@@ -1,7 +1,8 @@
 import requests 
 import concurrent.futures 
 import json 
-import os from datetime import datetime
+import os 
+from datetime import datetime
 
 API untuk pengecekan proxy
 
