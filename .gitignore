@@ -1,1 +1,4 @@
-result/*.txt
+# Jangan ignore seluruh folder result, tapi ignore selain .txt
+result/*
+!result/active.txt
+!result/dead.txt
