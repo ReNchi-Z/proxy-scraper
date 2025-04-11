@@ -14,20 +14,46 @@ def fetch_proxy_data():
     
     for url in api_urls:
         try:
-            print(f"Mengambil data dari {url}")
+            print(f"\nMengambil data dari {url}")
             response = requests.get(url, timeout=15)
+            
+            # Debug: Tampilkan response
+            print(f"Status Code: {response.status_code}")
+            print(f"Response Sample: {response.text[:200]}...")
+            
             if response.status_code == 200:
-                proxies = json.loads("[" + response.text.replace("}{", "},{") + "]")  # Fix format JSON
-                all_proxies.extend(proxies)
-                print(f"Found {len(proxies)} proxies")
+                try:
+                    # Coba parse sebagai JSON array
+                    proxies = json.loads(response.text)
+                    if isinstance(proxies, list):
+                        all_proxies.extend(proxies)
+                        print(f"Found {len(proxies)} proxies (array format)")
+                    else:
+                        # Jika bukan array, mungkin format JSON lines
+                        proxies = [json.loads(line) for line in response.text.splitlines() if line.strip()]
+                        all_proxies.extend(proxies)
+                        print(f"Found {len(proxies)} proxies (json lines format)")
+                except json.JSONDecodeError:
+                    # Jika format tidak standar (tanpa koma antara object)
+                    fixed_text = "[" + response.text.replace("}{", "},{") + "]"
+                    proxies = json.loads(fixed_text)
+                    all_proxies.extend(proxies)
+                    print(f"Found {len(proxies)} proxies (non-standard format)")
+                    
         except Exception as e:
-            print(f"Error: {str(e)}")
+            print(f"Error fetching {url}: {str(e)}")
     
     return all_proxies
 
 # Fungsi untuk memeriksa proxy
 def check_proxy(proxy):
-    api_url = f"https://api.renchi.workers.dev/api?ip={proxy['ip']}:{proxy['port']}"
+    if not isinstance(proxy, dict):
+        print(f"Invalid proxy format: {proxy}")
+        return {"status": "error"}
+    
+    ip_port = f"{proxy.get('ip')}:{proxy.get('port')}"
+    api_url = f"https://api.renchi.workers.dev/api?ip={ip_port}"
+    
     try:
         response = requests.get(api_url, timeout=10)
         data = response.json()
@@ -44,7 +70,7 @@ def check_proxy(proxy):
             }
         return {"status": "dead"}
     except Exception as e:
-        print(f"Error checking {proxy['ip']}:{proxy['port']} - {str(e)}")
+        print(f"Error checking {ip_port}: {str(e)}")
         return {"status": "error"}
 
 # Fungsi utama
@@ -53,29 +79,46 @@ def main():
     
     # Ambil data proxy
     proxies = fetch_proxy_data()
-    print(f"Total {len(proxies)} proxy ditemukan")
+    print(f"\nTotal {len(proxies)} proxy ditemukan")
     
     if not proxies:
         print("Tidak ada proxy yang ditemukan")
         return
     
     # Buka file output
-    with open('active.txt', 'w') as active, open('dead.txt', 'w') as dead:
+    with open('active.txt', 'w', encoding='utf-8') as active, \
+         open('dead.txt', 'w', encoding='utf-8') as dead:
+        
         # Proses setiap proxy
         for i, proxy in enumerate(proxies, 1):
-            print(f"Memeriksa {i}/{len(proxies)}: {proxy['ip']}:{proxy['port']}")
+            if not isinstance(proxy, dict):
+                print(f"\nProxy format tidak valid: {proxy}")
+                continue
+                
+            ip = proxy.get('ip', '')
+            port = proxy.get('port', '')
+            
+            if not ip or not port:
+                print(f"\nData proxy tidak lengkap: {proxy}")
+                continue
+                
+            print(f"\nMemeriksa {i}/{len(proxies)}: {ip}:{port}")
             
             result = check_proxy(proxy)
             
             if result["status"] == "active":
                 d = result["data"]
                 active.write(f"{d['ip']},{d['port']},{d['countryid']},{d['isp']}\n")
+                print("Status: AKTIF")
+            elif result["status"] == "dead":
+                dead.write(f"{ip}:{port}\n")
+                print("Status: MATI")
             else:
-                dead.write(f"{proxy['ip']}:{proxy['port']}\n")
+                print("Status: ERROR")
             
             time.sleep(1)  # Delay untuk menghindari rate limit
     
-    print("Proses selesai!")
+    print("\nProses selesai!")
 
 if __name__ == "__main__":
     main()
