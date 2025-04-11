@@ -1,75 +1,75 @@
-import aiohttp
-import asyncio
+import requests
 import os
-from aiohttp import ClientTimeout
 
-RAW_PROXY_FILE = "proxies/rawproxy.txt"
-ACTIVE_FILE = "proxies/active.txt"
-DEAD_FILE = "proxies/dead.txt"
-
-PROXY_SOURCES = [
+sources = [
     "https://bestip.06151953.xyz/bestip/Asia?regex=true",
     "https://bestip.06151953.xyz/bestip/America?regex=true",
-    "https://bestip.06151953.xyz/bestip/Europe?regex=true",
+    "https://bestip.06151953.xyz/bestip/Europe?regex=true"
 ]
 
-async def fetch_raw_proxies():
-    proxies = set()
-    os.makedirs("proxies", exist_ok=True)
-    async with aiohttp.ClientSession(timeout=ClientTimeout(total=30)) as session:
-        for url in PROXY_SOURCES:
-            try:
-                async with session.get(url) as resp:
-                    if resp.status == 200:
-                        data = await resp.json()
-                        for item in data:
-                            ip = item.get("ip")
-                            port = item.get("port")
-                            if ip and port:
-                                proxies.add(f"{ip}:{port}")
-                        print(f"[+] {url} -> {len(data)} proxies fetched")
-                    else:
-                        print(f"[!] Failed fetching {url} (Status {resp.status})")
-            except Exception as e:
-                print(f"[!] Error fetching {url}: {e}")
+raw_proxy_file = "proxies/rawproxy.txt"
+active_file = "proxies/active.txt"
+dead_file = "proxies/dead.txt"
+log_file = "proxies/log.txt"
 
-    with open(RAW_PROXY_FILE, "w") as f:
-        for proxy in proxies:
-            f.write(proxy + "\n")
-    print(f"[+] Total proxies saved: {len(proxies)}")
+# Buat folder proxies
+os.makedirs("proxies", exist_ok=True)
 
-async def check_proxy(session, proxy):
+# Scrap proxies
+all_proxies = set()
+print("[*] Scraping proxies...")
+for url in sources:
+    try:
+        res = requests.get(url, timeout=15)
+        lines = res.text.splitlines()
+        count = 0
+        for line in lines:
+            line = line.strip()
+            if ":" in line:
+                all_proxies.add(line)
+                count += 1
+        print(f"[+] {url} -> {count} proxies fetched")
+    except Exception as e:
+        print(f"[!] Error fetching from {url}: {e}")
+
+# Simpan ke rawproxy.txt
+with open(raw_proxy_file, "w") as f:
+    for proxy in all_proxies:
+        f.write(proxy + "\n")
+print(f"[+] Total proxies saved: {len(all_proxies)}")
+
+# Reset hasil & log
+open(active_file, "w").close()
+open(dead_file, "w").close()
+open(log_file, "w").close()
+
+active = []
+dead = []
+
+# Cek satu-satu ke API renchi
+print("[*] Checking proxies...")
+for proxy in all_proxies:
     url = f"https://api.renchi.workers.dev/api?ip={proxy}"
     try:
-        async with session.get(url, timeout=10) as resp:
-            if resp.status == 200:
-                data = await resp.json()
-                if "ACTIVE" in data.get("proxyStatus", ""):
-                    return proxy, True
-    except:
-        pass
-    return proxy, False
+        res = requests.get(url, timeout=10)
+        data = res.json()
+        if data.get("status") == "success":
+            active.append(proxy)
+            with open(log_file, "a") as log:
+                log.write(f"[✓] {proxy} is ACTIVE\n")
+        else:
+            dead.append(proxy)
+            with open(log_file, "a") as log:
+                log.write(f"[✗] {proxy} is DEAD (bad response)\n")
+    except Exception as e:
+        dead.append(proxy)
+        with open(log_file, "a") as log:
+            log.write(f"[✗] {proxy} is DEAD ({str(e)})\n")
 
-async def main():
-    await fetch_raw_proxies()
+# Simpan hasil
+with open(active_file, "w") as f:
+    f.write("\n".join(active))
+with open(dead_file, "w") as f:
+    f.write("\n".join(dead))
 
-    with open(RAW_PROXY_FILE, "r") as f:
-        proxies = [line.strip() for line in f if line.strip()]
-
-    active, dead = [], []
-    async with aiohttp.ClientSession() as session:
-        tasks = [check_proxy(session, proxy) for proxy in proxies]
-        results = await asyncio.gather(*tasks)
-
-    for proxy, is_active in results:
-        (active if is_active else dead).append(proxy)
-
-    with open(ACTIVE_FILE, "w") as f:
-        f.write("\n".join(active))
-    with open(DEAD_FILE, "w") as f:
-        f.write("\n".join(dead))
-
-    print(f"[✓] Done! Active: {len(active)}, Dead: {len(dead)}")
-
-if __name__ == "__main__":
-    asyncio.run(main())
+print(f"[✓] Done! Active: {len(active)}, Dead: {len(dead)}")
