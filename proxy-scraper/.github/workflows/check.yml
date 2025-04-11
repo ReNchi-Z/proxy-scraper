@@ -1,0 +1,35 @@
+name: Check Proxy
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "*/30 * * * *"  # Setiap 30 menit
+
+jobs:
+  run:
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: Checkout Repo
+      uses: actions/checkout@v3
+
+    - name: Setup Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: '3.11'
+
+    - name: Install Dependencies
+      run: pip install aiohttp
+
+    - name: Run Proxy Checker
+      run: python scripts/check_proxy.py
+      env:
+        PROXY_SOURCES: ${{ secrets.PROXY_SOURCES }}
+
+    - name: Commit Results
+      run: |
+        git config --global user.name 'github-actions'
+        git config --global user.email 'github-actions@github.com'
+        git add result/*.txt
+        git commit -m "update result" || echo "No changes to commit"
+        git push
