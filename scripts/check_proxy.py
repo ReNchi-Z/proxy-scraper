@@ -1,72 +1,82 @@
-import asyncio
 import aiohttp
-import json
+import asyncio
 import os
-from datetime import datetime
+import json
 
-PROXY_SOURCES = os.getenv("PROXY_SOURCES", "").split("\n")
+SOURCE_URLS = [
+    "https://bestip.06151953.xyz/bestip/Asia?regex=true",
+    "https://bestip.06151953.xyz/bestip/America?regex=true",
+    "https://bestip.06151953.xyz/bestip/Europe?regex=true"
+]
+
+RAW_PROXY_FILE = "rawproxy.txt"
 OUTPUT_ACTIVE = "proxies/active.txt"
 OUTPUT_DEAD = "proxies/dead.txt"
+RENCHI_API = "https://api.renchi.workers.dev/api?ip={ip}"
+
+
+async def fetch_json(session, url):
+    async with session.get(url, timeout=20) as response:
+        return await response.json()
+
 
 async def fetch_proxies():
     proxies = set()
-    for url in PROXY_SOURCES:
-        if not url.strip():
-            continue
-        try:
-            async with aiohttp.ClientSession() as session:
-                async with session.get(url, timeout=10) as response:
-                    if response.status == 200:
-                        data = await response.text()
-                        try:
-                            json_data = json.loads(data)
-                            for item in json_data:
-                                ip = item.get("ip") or item.get("proxyHost")
-                                port = item.get("port") or item.get("proxyPort")
-                                if ip and port:
-                                    proxies.add(f"{ip}:{port}")
-                        except json.JSONDecodeError:
-                            lines = data.strip().split("\n")
-                            for line in lines:
-                                if ":" in line:
-                                    proxies.add(line.strip())
-        except Exception as e:
-            print(f"Failed to fetch from {url}: {e}")
+    async with aiohttp.ClientSession() as session:
+        for url in SOURCE_URLS:
+            try:
+                data = await fetch_json(session, url)
+                for item in data:
+                    ip = item.get("ip")
+                    port = item.get("port")
+                    if ip and port:
+                        proxies.add(f"{ip}:{port}")
+                print(f"[+] {url} -> {len(data)} proxies fetched")
+            except Exception as e:
+                print(f"[!] Failed fetching from {url}: {e}")
     return list(proxies)
 
+
 async def check_proxy(session, proxy):
-    url = f"https://api.renchi.workers.dev/api?ip={proxy}"
+    ip, port = proxy.split(":")
     try:
-        async with session.get(url, timeout=10) as response:
-            if response.status == 200:
-                result = await response.json()
-                status = result.get("proxyStatus", "").lower()
-                if "active" in status:
-                    return "active", proxy
-                else:
-                    return "dead", proxy
-            else:
-                return "dead", proxy
-    except Exception as e:
-        return "dead", proxy
+        async with session.get(RENCHI_API.format(ip=ip), timeout=10) as response:
+            data = await response.json()
+            return proxy if "✅ ACTIVE ✅" in data.get("proxyStatus", "") else None
+    except:
+        return None
+
+
+async def check_all_proxies(proxies):
+    active = []
+    dead = []
+
+    async with aiohttp.ClientSession() as session:
+        tasks = [check_proxy(session, proxy) for proxy in proxies]
+        results = await asyncio.gather(*tasks)
+
+    for proxy, result in zip(proxies, results):
+        if result:
+            active.append(proxy)
+        else:
+            dead.append(proxy)
+
+    return active, dead
+
 
 async def main():
+    os.makedirs("proxies", exist_ok=True)
+
     print("Fetching proxies...")
     proxies = await fetch_proxies()
     print(f"Total proxies fetched: {len(proxies)}")
 
-    active = []
-    dead = []
+    # Simpan ke rawproxy.txt
+    with open(RAW_PROXY_FILE, "w") as f:
+        f.write("\n".join(proxies))
 
-    connector = aiohttp.TCPConnector(limit=100)
-    async with aiohttp.ClientSession(connector=connector) as session:
-        tasks = [check_proxy(session, proxy) for proxy in proxies]
-        for future in asyncio.as_completed(tasks):
-            status, proxy = await future
-            if status == "active":
-                active.append(proxy)
-            else:
-                dead.append(proxy)
+    print("Checking proxies with Renchi API...")
+    active, dead = await check_all_proxies(proxies)
 
     print(f"Active: {len(active)}, Dead: {len(dead)}")
 
@@ -75,6 +85,7 @@ async def main():
 
     with open(OUTPUT_DEAD, "w") as f:
         f.write("\n".join(dead))
+
 
 if __name__ == "__main__":
     asyncio.run(main())
