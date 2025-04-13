@@ -1,6 +1,7 @@
 import requests
 import json
 import time
+import concurrent.futures
 
 # Fungsi untuk mengambil data proxy dari API
 def fetch_proxy_data():
@@ -89,34 +90,47 @@ def main():
     with open('active.txt', 'w', encoding='utf-8') as active, \
          open('dead.txt', 'w', encoding='utf-8') as dead:
         
-        # Proses setiap proxy
-        for i, proxy in enumerate(proxies, 1):
-            if not isinstance(proxy, dict):
-                print(f"\nProxy format tidak valid: {proxy}")
-                continue
-                
+        # Proses setiap proxy secara paralel dengan ThreadPoolExecutor
+        def process_proxy(proxy):
             ip = proxy.get('ip', '')
             port = proxy.get('port', '')
-            
             if not ip or not port:
-                print(f"\nData proxy tidak lengkap: {proxy}")
-                continue
-                
-            print(f"\nMemeriksa {i}/{len(proxies)}: {ip}:{port}")
+                return None  # Lewatkan proxy yang tidak lengkap
             
+            print(f"\nMemeriksa: {ip}:{port}")
             result = check_proxy(proxy)
-            
             if result["status"] == "active":
-                d = result["data"]
-                active.write(f"{d['ip']},{d['port']},{d['countryid']},{d['isp']}\n")
-                print("Status: AKTIF")
+                return ("active", result["data"])
             elif result["status"] == "dead":
-                dead.write(f"{ip}:{port}\n")
-                print("Status: MATI")
+                return ("dead", f"{ip}:{port}")
             else:
-                print("Status: ERROR")
+                return None  # Jika status error, jangan simpan
+
+        # Gunakan ThreadPoolExecutor untuk memproses proxy secara paralel
+        with concurrent.futures.ThreadPoolExecutor(max_workers=5) as executor:
+            futures = [executor.submit(process_proxy, proxy) for proxy in proxies]
             
-            time.sleep(1)  # Delay untuk menghindari rate limit
+            results = []
+            for future in concurrent.futures.as_completed(futures):
+                result = future.result()
+                if result:
+                    results.append(result)
+            
+            # Urutkan berdasarkan countryid dengan prioritas ID, SG, MY, JP
+            country_priority = ["ID", "SG", "MY", "JP"]
+            results.sort(key=lambda x: country_priority.index(x[1]['countryid']) if x[0] == "active" else float('inf'))
+            
+            # Menulis hasil ke file
+            for status, data in results:
+                if status == "active":
+                    active.write(f"{data['ip']},{data['port']},{data['countryid']},{data['isp']}\n")
+                    print(f"Status: AKTIF - {data['countryid']}")
+                elif status == "dead":
+                    dead.write(f"{data}\n")
+                    print(f"Status: MATI - {data}")
+            
+            # Tunggu semua task selesai
+            concurrent.futures.wait(futures)
     
     print("\nProses selesai!")
 
