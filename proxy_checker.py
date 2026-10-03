@@ -48,7 +48,7 @@ def check_proxy(proxy):
         return {"status": "error"}
     
     ip_port = f"{proxy.get('ip')}:{proxy.get('port')}"
-    api_url = f"https://api.renchi.workers.dev/api?ip={ip_port}"
+    api_url = f"https://proxy-checker.lordzeo404.workers.dev/?ip={ip_port}"
     
     try:
         response = requests.get(api_url, timeout=10)
