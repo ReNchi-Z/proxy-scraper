@@ -29,7 +29,7 @@ def scrape_proxies():
 
 # Fungsi untuk cek proxy
 def check_proxy(proxy):
-    api_url = f"https://api.renchi.workers.dev/api?ip={proxy}"
+    api_url = f"https://proxy-checker.lordzeo404.workers.dev/?ip={proxy}"
     try:
         response = requests.get(api_url, timeout=10)
         data = response.json()
